@@ -1,0 +1,133 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
+
+
+/**
+ * @title Options Contract
+ * @dev ERC20 token with added functionalities for speculative betting on Ethereum price movement.
+ *      This contract uses WETH/USDT pair from Uniswap for ETH price checks.
+ *      Inherits OpenZeppelin's ERC20 standard and ReentrancyGuard for security.
+ */
+
+contract Options is ERC20, ReentrancyGuard {
+
+    // Mapping user addresses to their Buy and Sell prices
+    mapping (address => uint) internal BuyPrice;
+    mapping (address => uint) internal SellPrice;
+
+    // Uniswap WETH/USDT pair address
+    IUniswapV2Pair uniswapPair = IUniswapV2Pair(0x0d4a11d5EEaaC28EC3F61d100daF4d40471f1852);
+
+    // Events for logging buy and sell price setting
+    event BuyPriceSet(address indexed user, uint price);
+    event SellPriceSet(address indexed user, uint price);
+
+    /**
+     * @dev Constructor to mint initial tokens and set up the Uniswap pair.
+     */
+
+    constructor() ERC20("Options", "OPTION") {
+        _mint(address(this), 1000000 * 10 ** decimals());
+    }
+
+    /**
+     * @dev Public view function to check ETH price using Uniswap WETH/USDT pair.
+     * @return Current ETH price based on Uniswap reserves.
+     */
+
+    function eth_price_check() public view returns (uint) {
+        (uint Res0, uint Res1,) = uniswapPair.getReserves();
+        // Assuming Res0 is WETH and Res1 is USDT
+        return (Res0 * 1e18 / Res1);
+    }
+
+    /**
+     * @dev Public payable function for users to bet on ETH price increase.
+     *      Users must send 0.01 ETH to start the bet.
+     *      If successful, the user gets 90% of contract's ETH.
+     *      Otherwise, receives a consolation prize in $OPTION tokens.
+     */
+     
+    function buy() public payable nonReentrant {
+        require(msg.value == 0.01 ether, "Must send 0.01 ETH");
+        uint currentPrice = eth_price_check();
+        BuyPrice[_msgSender()] = currentPrice;
+        emit BuyPriceSet(_msgSender(), currentPrice);
+
+        if (SellPrice[_msgSender()] != 0) {
+            if (currentPrice > SellPrice[_msgSender()]) {
+                // Successful bet: User wins 90% of contract's ETH balance
+                uint reward = address(this).balance * 90 / 100;
+                (bool sent, ) = _msgSender().call{value: reward}("");
+                require(sent, "Failed to send Ether");
+                delete BuyPrice[_msgSender()];
+                delete SellPrice[_msgSender()];
+            } else {
+                // Unsuccessful bet: User receives consolation $OPTION tokens
+                uint consolation = totalSupply() * 1 / 1000;
+                _mint(_msgSender(), consolation);
+                delete BuyPrice[_msgSender()];
+                delete SellPrice[_msgSender()];
+            }
+        }
+    }
+
+    /**
+     * @dev Public payable function for users to bet on ETH price decrease.
+     *      Users must send 0.01 ETH to start the bet.
+     *      If successful, the user gets 90% of contract's ETH.
+     *      Otherwise, receives a consolation prize in $OPTION tokens.
+     */
+
+    function sell() public payable nonReentrant {
+        require(msg.value == 0.01 ether, "Must send 0.01 ETH");
+        uint currentPrice = eth_price_check();
+        SellPrice[_msgSender()] = currentPrice;
+        emit SellPriceSet(_msgSender(), currentPrice);
+
+        if (BuyPrice[_msgSender()] != 0) {
+            if (currentPrice < BuyPrice[_msgSender()]) {
+                // Successful bet: User wins 90% of contract's ETH balance
+                uint reward = address(this).balance * 90 / 100;
+                (bool sent, ) = _msgSender().call{value: reward}("");
+                require(sent, "Failed to send Ether");
+                delete BuyPrice[_msgSender()];
+                delete SellPrice[_msgSender()];
+            } else {
+                // Unsuccessful bet: User receives consolation $OPTION tokens
+                uint consolation = totalSupply() * 1 / 1000;
+                _mint(_msgSender(), consolation);
+                delete BuyPrice[_msgSender()];
+                delete SellPrice[_msgSender()];
+            }
+        }
+    }
+
+    /**
+     * @dev External view function to get BuyPrice for user.
+     * @return BuyPrice of the specified user.
+     */
+
+    function getBuyPrice() external view returns (uint) {
+        require(BuyPrice[_msgSender()] != 0, "User has no BuyPrice set");
+        return BuyPrice[_msgSender()];
+    }
+
+    /**
+     * @dev External view function to get SellPrice for user.
+     * @return SellPrice of the specified user.
+     */
+
+    function getSellPrice() external view returns (uint) {
+        require(SellPrice[_msgSender()] != 0, "User has no SellPrice set");
+        return SellPrice[_msgSender()];
+    }
+
+    // Fallback and receive functions
+    fallback() external payable nonReentrant {}
+    receive()  external payable nonReentrant {}
+}
